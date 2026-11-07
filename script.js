@@ -181,8 +181,12 @@ async function loadFFmpeg(){
 async function writeInput(){
   const extension = getInputExtension(selectedFile);
   const inputName = `input.${extension}`;
-  await ffmpeg.writeFile(inputName, await fetchFile(selectedFile));
-  return inputName;
+  // WORKERFS monta el archivo directamente desde el disco, sin copiarlo a la memoria de FFmpeg.
+  // Así un vídeo de 20 minutos (cientos de MB o más) no revienta la memoria del navegador.
+  try{ await ffmpeg.createDir("/work"); }catch(_){}
+  try{ await ffmpeg.unmount("/work"); }catch(_){}
+  await ffmpeg.mount("WORKERFS", { files: [new File([selectedFile], inputName)] }, "/work");
+  return `/work/${inputName}`;
 }
 
 async function exportOneClip(inputName,start,end,index,total){
@@ -201,6 +205,7 @@ async function exportOneClip(inputName,start,end,index,total){
     "-t", String(duration),
     "-map", "0:v:0",
     "-map", "0:a?",
+    "-vf", "scale=-2:'min(720,ih)'",
     "-c:v", "libx264",
     "-preset", "ultrafast",
     "-crf", "23",
@@ -245,7 +250,7 @@ async function generateClips(){
       resultsSummary.textContent = `${i+1} de ${segments.length} clips listos.`;
     }
 
-    try{ await ffmpeg.deleteFile(inputName); }catch(_){}
+    try{ await ffmpeg.unmount("/work"); }catch(_){}
 
     setProgress(100,"Proceso terminado","Todos los clips están listos para descargar.");
     resultsSummary.textContent = `${segments.length} clips MP4 listos.`;
